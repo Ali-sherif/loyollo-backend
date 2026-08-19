@@ -7,3 +7,59 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum ProfileRole {
+  admin
+  staff
+  customer
+}
+
+enum AccountStatus {
+  active
+  inactive
+  pending
+}
+
+model Profile {
+  id            String        @id @default(uuid()) @db.Uuid
+  email         String        @unique
+  password_hash String
+  role          ProfileRole   @default(admin)
+  account_status AccountStatus @default(active)
+  owner_id      String        @db.Uuid
+  full_name     String?
+  business_name String?
+  phone         String?
+  onboarding_completed Boolean  @default(false)
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @updatedAt
+
+  refresh_tokens RefreshToken[]
+  password_reset_tokens PasswordResetToken[]
+
+  @@map("profiles")
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  token_hash String   @unique
+  profile_id String   @db.Uuid
+  expires_at DateTime
+  created_at DateTime @default(now())
+  profile    Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id])
+  @@map("password_reset_tokens")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  token_hash String   @unique
+  profile_id String   @db.Uuid
+  expires_at DateTime
+  created_at DateTime @default(now())
+  profile    Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id])
+  @@map("refresh_tokens")
+}
