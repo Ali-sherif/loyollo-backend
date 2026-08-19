@@ -260,8 +260,10 @@ export function applyMigrations(databaseUrl: string): void {
   if (!hasPrismaMigrations()) {
     return;
   }
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  execFileSync(npx, ["prisma", "migrate", "deploy"], {
+  // Run the CLI's JS entrypoint directly rather than the `npx` shim: Node refuses
+  // to spawn a `.cmd` without a shell on Windows, and a shell here buys nothing.
+  const prismaCli = require.resolve("prisma/build/index.js");
+  execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
     cwd: repoRoot(),
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "inherit",

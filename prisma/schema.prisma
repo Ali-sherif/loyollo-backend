@@ -7,3 +7,183 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+/// Locked stored names (ADR-005). Never `merchant_admin` / `staff_cashier` / `purchaser`.
+enum Role {
+  admin
+  staff
+  customer
+}
+
+/// `pending` has no writer since ADR-022 replaced temp-password onboarding.
+/// The value stays in the enum, reserved for future use.
+enum AccountStatus {
+  active
+  inactive
+  pending
+}
+
+/// No stored `EXPIRED`: expiry is computed as `status = PENDING AND expires_at <= now()`
+/// on every validate/accept (ADR-022 §D).
+enum InvitationStatus {
+  PENDING
+  CONSUMED
+  REVOKED
+}
+
+enum AuthAuditAction {
+  sign_in_failed
+  account_locked
+  refresh_reuse_detected
+  invitation_created
+  invitation_resent
+  invitation_revoked
+  invitation_accepted
+  account_status_changed
+  password_reset
+  sign_out_all
+}
+
+model Profile {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email          String        @unique
+  password_hash  String
+  full_name      String?
+  role           Role          @default(customer)
+  account_status AccountStatus @default(active)
+
+  /// Shop scope. Null for `admin` (resolves to own `id`); set for `staff`.
+  owner_id  String? @db.Uuid
+  branch_id String? @db.Uuid
+
+  /// Automatic lockout only. Never read or written by PATCH /auth/accounts/:id/status (ADR-005).
+  failed_login_count Int       @default(0)
+  locked_until       DateTime? @db.Timestamptz(6)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+
+  owner   Profile?  @relation("ShopMembers", fields: [owner_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  members Profile[] @relation("ShopMembers")
+  branch  Branch?   @relation("BranchMembers", fields: [branch_id], references: [id], onDelete: SetNull)
+
+  shop_branches         Branch[]             @relation("ShopBranches")
+  refresh_tokens        RefreshToken[]
+  password_reset_tokens PasswordResetToken[]
+  invitations_created   Invitation[]         @relation("InvitationCreatedBy")
+  invitations_consumed  Invitation[]         @relation("InvitationConsumedBy")
+
+  @@index([role])
+  @@index([account_status])
+  @@index([owner_id])
+  @@map("profiles")
+}
+
+/// Minimal branch record needed by the invitation flow (ADR-022 §B).
+/// Full branch domain (plan caps, main-branch uniqueness) lands with its own sprint.
+model Branch {
+  id      String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shop_id String  @db.Uuid
+  name    String
+  is_main Boolean @default(false)
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+
+  shop        Profile      @relation("ShopBranches", fields: [shop_id], references: [id], onDelete: Cascade)
+  members     Profile[]    @relation("BranchMembers")
+  invitations Invitation[]
+
+  @@index([shop_id])
+  @@map("branches")
+}
+
+model RefreshToken {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profile_id String @db.Uuid
+
+  /// sha256 of the raw token. The raw token is never persisted.
+  token_hash String @unique
+
+  expires_at DateTime  @db.Timestamptz(6)
+  revoked_at DateTime? @db.Timestamptz(6)
+
+  /// Rotation chain, used for reuse detection.
+  replaced_by_id String? @unique @db.Uuid
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  profile     Profile       @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  replaced_by RefreshToken? @relation("TokenRotation", fields: [replaced_by_id], references: [id], onDelete: SetNull)
+  replaces    RefreshToken? @relation("TokenRotation")
+
+  @@index([profile_id])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profile_id String @db.Uuid
+
+  /// sha256 of the raw token. The raw token is never persisted.
+  token_hash String @unique
+
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id])
+  @@map("password_reset_tokens")
+}
+
+/// Staff/admin enrollment credential (ADR-022). Never a session credential.
+model Invitation {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email   String
+  /// Inviting admin's shop scope. Never client-supplied.
+  shop_id String @db.Uuid
+
+  branch_id String @db.Uuid
+  role      Role
+
+  /// sha256 of a crypto.randomBytes(32) token. The raw token is never persisted.
+  token_hash String           @unique
+  status     InvitationStatus @default(PENDING)
+
+  expires_at  DateTime  @db.Timestamptz(6)
+  consumed_at DateTime? @db.Timestamptz(6)
+  revoked_at  DateTime? @db.Timestamptz(6)
+
+  created_by_profile_id  String  @db.Uuid
+  consumed_by_profile_id String? @db.Uuid
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+
+  branch      Branch   @relation(fields: [branch_id], references: [id], onDelete: Restrict)
+  created_by  Profile  @relation("InvitationCreatedBy", fields: [created_by_profile_id], references: [id], onDelete: Cascade)
+  consumed_by Profile? @relation("InvitationConsumedBy", fields: [consumed_by_profile_id], references: [id], onDelete: SetNull)
+
+  @@index([shop_id, status])
+  @@index([email, status])
+  @@map("invitations")
+}
+
+/// Admin/security actions with a defined actor. Never stores tokens, hashes, or passwords.
+model AuthAuditLog {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id  String?         @db.Uuid
+  target_id String?         @db.Uuid
+  action    AuthAuditAction
+  ip        String?
+  metadata  Json            @default("{}")
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([actor_id])
+  @@index([target_id])
+  @@index([action, created_at])
+  @@map("auth_audit_logs")
+}

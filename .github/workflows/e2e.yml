@@ -26,11 +26,31 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # Auth rate limiting fails closed without Redis, so it is not optional here.
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://loyollo:loyollo@localhost:5432/loyollo
       E2E_DATABASE_URL: postgresql://loyollo:loyollo@localhost:5432/loyollo
       E2E_RUN_ID: gha_${{ github.run_id }}_${{ github.run_attempt }}_${{ github.job }}
       E2E_WORKER_COUNT: "2"
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      # Values below are test-only; production secrets come from the platform.
+      JWT_ACCESS_SECRET: ci-only-access-secret-ci-only-access-secret
+      JWT_ACCESS_TTL: 15m
+      AUTH_TRACKER_SALT: ci-only-tracker-salt
+      MESSAGING_INTERNAL_SECRET: ci-only-messaging-secret
+      MAILER_PROVIDER: log
+      CORS_ORIGIN: http://localhost:3000
+      APP_BASE_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,4 +59,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - run: npx tsc --noEmit -p tsconfig.build.json
+      - run: npx tsc --noEmit -p test/tsconfig.json
       - run: npm run test:e2e

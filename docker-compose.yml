@@ -15,5 +15,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Rate-limiter storage only (ADR-020). Auth fails closed when this is down.
+  # Reused by BullMQ campaign workers in LOYB-9 (ADR-021) — do not add a second Redis.
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
+  redis_data:

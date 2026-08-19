@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Without this the root-level `prisma.config.ts` widens the inferred root and
+    // the entrypoint lands at `dist/src/main.js` instead of `dist/main.js`.
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]
 }
