@@ -11,6 +11,9 @@ dist
 # Prisma generated client
 src/generated/prisma
 
+# E2E isolation run id (written by Jest globalSetup)
+test/.e2e-run-id
+
 # Logs
 logs
 *.log

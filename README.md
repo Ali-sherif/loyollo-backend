@@ -31,6 +31,14 @@ npm run start:dev
 
 Frontend is unchanged: `cd ../loyollo-web && npm run dev` (port 3000).
 
+## E2E tests
+
+Requires Postgres (`docker compose up -d`). Each Jest worker gets its own `e2e_<run>_w<n>` database cloned from a migrated template; those databases are dropped after the run (including failures). The `loyollo` database is never used for test data.
+
+```bash
+npm run test:e2e
+```
+
 ## Out of scope (this scaffold)
 
 No product Prisma models, auth, Redis, workers, or Next.js wiring yet. First schema work follows the remediation roadmap in `loyollo-web/docs/backend/`.
