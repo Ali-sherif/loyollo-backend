@@ -4,6 +4,7 @@ NestJS API for Loyollo Phase 2. Product schema and HTTP contracts live in the fr
 
 - Contracts: [`loyollo-web/docs/backend/`](../loyollo-web/docs/backend/README.md) (`data-contract.md`, `api-contract.md`, `remediation-roadmap.md`)
 - Stack: NestJS 11.x, Prisma 7.x, PostgreSQL 18.x, Node 24 LTS ([ADR-015](../loyollo-web/docs/architecture/decisions/ADR-015-backend-stack.md))
+- **Messaging (DECIDED):** templates + Resend live here under `src/messaging/` ([ADR-018](../loyollo-web/docs/architecture/decisions/ADR-018-messaging-consolidation.md)); overview in [backend README § Messaging](../loyollo-web/docs/backend/README.md#messaging-decided--adr-018); HTTP in [api-contract § Messaging](../loyollo-web/docs/backend/api-contract.md#messaging--adr-018). `RESEND_API_KEY` / `MESSAGING_INTERNAL_SECRET` stay in this repo only.
 
 Local Docker runs **Postgres only**. Nest and Next.js stay on the host.
 
