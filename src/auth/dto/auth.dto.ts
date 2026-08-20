@@ -74,6 +74,19 @@ export class ForgotPasswordDto {
   email!: string;
 }
 
+export class VerifyEmailDto {
+  @IsString()
+  @MaxLength(512)
+  token!: string;
+}
+
+export class ResendVerificationDto {
+  @Transform(normalizeEmailTransform)
+  @IsEmail()
+  @MaxLength(320)
+  email!: string;
+}
+
 export class ResetPasswordDto {
   @IsString()
   @MaxLength(512)

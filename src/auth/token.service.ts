@@ -15,6 +15,7 @@ export type SessionProfile = {
   email: string;
   role: Role;
   account_status: AccountStatus;
+  email_confirmed_at: Date | null;
   owner_id: string | null;
 };
 
@@ -23,6 +24,7 @@ export type SessionUser = {
   email: string;
   role: Role;
   account_status: AccountStatus;
+  email_confirmed_at: string | null;
   owner_id: string;
 };
 
@@ -44,6 +46,7 @@ export function toSessionUser(profile: SessionProfile): SessionUser {
     email: profile.email,
     role: profile.role,
     account_status: profile.account_status,
+    email_confirmed_at: profile.email_confirmed_at?.toISOString() ?? null,
     owner_id: shopScopeOf(profile),
   };
 }
@@ -66,6 +69,7 @@ export class TokenService {
       email: profile.email,
       role: profile.role,
       account_status: profile.account_status,
+      email_confirmed_at: profile.email_confirmed_at?.toISOString() ?? null,
       owner_id: shopScopeOf(profile),
     };
     return this.jwt.signAsync(claims);

@@ -361,6 +361,7 @@ export class InvitationService {
           full_name: dto.full_name,
           role: invitation.role,
           account_status: AccountStatus.active,
+          email_confirmed_at: new Date(),
           owner_id: invitation.shop_id,
           branch_id: invitation.branch_id,
         },
@@ -370,6 +371,7 @@ export class InvitationService {
           role: true,
           account_status: true,
           owner_id: true,
+          email_confirmed_at: true,
         },
       });
 

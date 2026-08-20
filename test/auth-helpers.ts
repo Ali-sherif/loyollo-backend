@@ -7,7 +7,14 @@ import type { E2EContext } from "./create-app";
 export const PASSWORD = "correct-horse-battery-staple";
 
 export type Session = {
-  user: { id: string; email: string; role: string; account_status: string; owner_id: string };
+  user: {
+    id: string;
+    email: string;
+    role: string;
+    account_status: string;
+    owner_id: string;
+    email_confirmed_at: string | null;
+  };
   permissions: string[];
   access_token: string;
   refresh_token: string;
@@ -21,8 +28,8 @@ export function uniqueEmail(prefix: string): string {
   return `${prefix}-${randomUUID()}@example.test`;
 }
 
-/** Registers a merchant admin and returns the session the API handed back. */
-export async function signUpAdmin(
+/** Registers a merchant admin without consuming the verification email. */
+export async function signUpAdminUnverified(
   ctx: E2EContext,
   email = uniqueEmail("admin"),
 ): Promise<{ email: string; session: Session }> {
@@ -33,6 +40,17 @@ export async function signUpAdmin(
     throw new Error(`sign-up failed: ${response.status} ${JSON.stringify(response.body)}`);
   }
   return { email, session: response.body as Session };
+}
+
+/** Registers and verifies a merchant so authenticated merchant fixtures remain usable. */
+export async function signUpAdmin(
+  ctx: E2EContext,
+  email = uniqueEmail("admin"),
+): Promise<{ email: string; session: Session }> {
+  const signedUp = await signUpAdminUnverified(ctx, email);
+  const token = await waitForEmail(() => ctx.mailer.tokenFor(email) ?? undefined);
+  const verified = await api(ctx).post("/auth/verify-email").send({ token }).expect(200);
+  return { email, session: verified.body as Session };
 }
 
 /** Sign-up creates exactly one branch per shop; invitations need its id. */

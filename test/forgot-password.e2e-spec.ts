@@ -98,7 +98,7 @@ describe("Forgot password anti-enumeration (e2e)", () => {
     await api(ctx).post("/auth/forgot-password").send({ email }).expect(200);
 
     const audit = await ctx.prisma.authAuditLog.findMany({
-      where: { actor_id: session.user.id },
+      where: { actor_id: session.user.id, action: "password_reset" },
     });
     expect(audit).toHaveLength(0);
   });

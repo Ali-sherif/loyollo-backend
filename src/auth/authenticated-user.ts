@@ -12,6 +12,7 @@ export type AuthenticatedUser = {
   email: string;
   role: Role;
   account_status: AccountStatus;
+  email_confirmed_at: string | null;
   /** Shop scope. Resolved to the caller's own id for `admin`. */
   owner_id: string;
 };
@@ -22,6 +23,7 @@ export type AccessTokenClaims = {
   email: string;
   role: Role;
   account_status: AccountStatus;
+  email_confirmed_at: string | null;
   owner_id: string;
   iat?: number;
   exp?: number;

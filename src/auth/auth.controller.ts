@@ -20,6 +20,7 @@ import { AccountsService } from "./accounts.service";
 import type { AuthenticatedUser } from "./authenticated-user";
 import { AuthService } from "./auth.service";
 import { CurrentUser } from "./decorators/current-user.decorator";
+import { AllowUnverified } from "./decorators/allow-unverified.decorator";
 import { Public } from "./decorators/public.decorator";
 import {
   AcceptInviteDto,
@@ -27,12 +28,14 @@ import {
   CreateInvitationDto,
   ForgotPasswordDto,
   RefreshDto,
+  ResendVerificationDto,
   ResetPasswordDto,
   SignInDto,
   SignOutDto,
   SignUpDto,
   UpdateAccountStatusDto,
   ValidateInvitationDto,
+  VerifyEmailDto,
 } from "./dto/auth.dto";
 import { InvitationService } from "./invitation.service";
 
@@ -89,20 +92,39 @@ export class AuthController {
     return this.auth.resetPassword(dto, clientIp(request));
   }
 
+  @Post("verify-email")
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(RATE_LIMITS.authReset)
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.auth.verifyEmail(dto);
+  }
+
+  @Post("resend-verification")
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(RATE_LIMITS.authStrict)
+  resendVerification(@Body() dto: ResendVerificationDto, @Req() request: Request) {
+    return this.auth.resendVerification(dto, clientIp(request));
+  }
+
   // --- Authenticated session ------------------------------------------------
 
   @Get("me")
+  @AllowUnverified()
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.auth.me(user);
   }
 
   @Post("sign-out")
+  @AllowUnverified()
   @HttpCode(HttpStatus.NO_CONTENT)
   async signOut(@CurrentUser() user: AuthenticatedUser, @Body() dto: SignOutDto) {
     await this.auth.signOut(user.id, dto.refresh_token);
   }
 
   @Post("sign-out-all")
+  @AllowUnverified()
   @HttpCode(HttpStatus.OK)
   signOutAll(@CurrentUser() user: AuthenticatedUser, @Req() request: Request) {
     return this.auth.signOutAll(user, clientIp(request));

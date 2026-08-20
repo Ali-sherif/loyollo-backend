@@ -26,6 +26,7 @@ describe("Auth session lifecycle (e2e)", () => {
         email,
         role: "admin",
         account_status: "active",
+        email_confirmed_at: null,
       });
       // An admin owns their own scope, so `owner_id` resolves to their own id.
       expect(response.body.user.owner_id).toBe(response.body.user.id);
@@ -34,6 +35,9 @@ describe("Auth session lifecycle (e2e)", () => {
       );
       expect(typeof response.body.access_token).toBe("string");
       expect(typeof response.body.refresh_token).toBe("string");
+      const mail = await waitForEmail(() => ctx.mailer.lastTo(email));
+      expect(mail.templateName).toBe("auth:signup");
+      expect(mail.subject).toBe("Confirm your email");
     });
 
     it("rejects a client-supplied role, account_status, or owner_id", async () => {
@@ -200,7 +204,7 @@ describe("Auth session lifecycle (e2e)", () => {
     it("stores only a hash of the refresh token", async () => {
       const { session } = await signUpAdmin(ctx);
       const rows = await ctx.prisma.refreshToken.findMany({
-        where: { profile_id: session.user.id },
+        where: { profile_id: session.user.id, revoked_at: null },
       });
       expect(rows).toHaveLength(1);
       expect(rows[0].token_hash).not.toBe(session.refresh_token);

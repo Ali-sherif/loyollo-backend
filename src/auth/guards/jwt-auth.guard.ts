@@ -7,6 +7,7 @@ import { AppError, ERROR_CODES } from "../../common/app.error";
 import { AccountStatus, Role } from "../../generated/prisma/enums";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AccessTokenClaims, AuthenticatedUser } from "../authenticated-user";
+import { ALLOW_UNVERIFIED_KEY } from "../decorators/allow-unverified.decorator";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
 /**
@@ -59,7 +60,7 @@ export class JwtAuthGuard implements CanActivate {
 
     const live = await this.prisma.profile.findUnique({
       where: { id: claims.sub },
-      select: { account_status: true },
+      select: { account_status: true, email_confirmed_at: true },
     });
 
     if (!live) {
@@ -74,11 +75,23 @@ export class JwtAuthGuard implements CanActivate {
       );
     }
 
+    const allowUnverified = this.reflector.getAllAndOverride<boolean>(ALLOW_UNVERIFIED_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (!allowUnverified && live.email_confirmed_at === null) {
+      throw AppError.forbidden(
+        ERROR_CODES.EMAIL_NOT_VERIFIED,
+        "Please verify your email address to access this resource.",
+      );
+    }
+
     request.user = {
       id: claims.sub,
       email: claims.email,
       role: claims.role,
       account_status: live.account_status,
+      email_confirmed_at: live.email_confirmed_at?.toISOString() ?? null,
       owner_id: claims.owner_id,
     };
 

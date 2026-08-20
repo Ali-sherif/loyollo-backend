@@ -17,6 +17,7 @@ export type AppConfig = {
     refreshTtlDays: number;
     passwordResetTtlMinutes: number;
     invitationTtlHours: number;
+    emailVerificationTtlHours: number;
     trackerSalt: string;
     /** Consecutive failed passwords before a temporary lockout. */
     maxFailedLogins: number;
@@ -98,6 +99,7 @@ export function configuration(): AppConfig {
       refreshTtlDays: optionalInt("REFRESH_TOKEN_TTL_DAYS", 30),
       passwordResetTtlMinutes: optionalInt("PASSWORD_RESET_TTL_MINUTES", 30),
       invitationTtlHours: optionalInt("INVITATION_TTL_HOURS", 24),
+      emailVerificationTtlHours: optionalInt("EMAIL_VERIFICATION_TTL_HOURS", 24),
       trackerSalt: required("AUTH_TRACKER_SALT"),
       maxFailedLogins: optionalInt("AUTH_MAX_FAILED_LOGINS", 5),
       lockoutMinutes: optionalInt("AUTH_LOCKOUT_MINUTES", 15),

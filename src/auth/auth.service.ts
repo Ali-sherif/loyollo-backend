@@ -15,9 +15,11 @@ import type {
   ChangePasswordDto,
   ForgotPasswordDto,
   RefreshDto,
+  ResendVerificationDto,
   ResetPasswordDto,
   SignInDto,
   SignUpDto,
+  VerifyEmailDto,
 } from "./dto/auth.dto";
 import { TokenService, toSessionUser, type SessionResponse } from "./token.service";
 
@@ -27,7 +29,10 @@ const SESSION_SELECT = {
   role: true,
   account_status: true,
   owner_id: true,
+  email_confirmed_at: true,
 } as const;
+
+type ClaimedEmailVerification = { profile_id: string };
 
 /**
  * Precomputed hash of a value no one can supply, compared against when the email is
@@ -40,6 +45,12 @@ const DUMMY_PASSWORD_HASH = "$2b$12$JQ3s7WjR0Zqk1w0Y2b0jMe0PN0EPPP3lRDlG4l1yTiTQ
 const GENERIC_FORGOT_PASSWORD_RESPONSE = {
   ok: true as const,
   message: "If an account with that email exists, a password reset link has been sent.",
+};
+
+const GENERIC_RESEND_RESPONSE = {
+  ok: true as const,
+  message:
+    "If an account with that email exists and still needs confirmation, a verification link has been sent.",
 };
 
 @Injectable()
@@ -77,6 +88,11 @@ export class AuthService {
     }
 
     const passwordHash = await this.hashPassword(dto.password);
+    const rawToken = generateRawToken();
+    const tokenHash = sha256(rawToken);
+    const expiresAt = new Date(
+      Date.now() + this.authConfig.emailVerificationTtlHours * 60 * 60 * 1000,
+    );
 
     // Merchant self-registration always derives `role` and `account_status`;
     // neither is readable from the request body.
@@ -98,10 +114,121 @@ export class AuthService {
         data: { shop_id: created.id, name: "Main branch", is_main: true },
       });
 
+      await tx.emailVerificationToken.create({
+        data: { profile_id: created.id, token_hash: tokenHash, expires_at: expiresAt },
+      });
+
       return created;
     });
 
+    const url = `${this.config.get("appBaseUrl", { infer: true })}/auth/verify?token=${rawToken}`;
+    this.messaging.dispatch(
+      () => this.messaging.sendAuthEmail("signup", profile.email, { confirmationUrl: url }),
+      "signup_verification_email_failed",
+    );
+
     return this.tokens.issueSession(profile);
+  }
+
+  // --- Email verification --------------------------------------------------
+
+  async verifyEmail(dto: VerifyEmailDto): Promise<SessionResponse> {
+    const tokenHash = sha256(dto.token);
+
+    const session = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.$queryRaw<ClaimedEmailVerification[]>`
+        UPDATE "email_verification_tokens"
+        SET "used_at" = now()
+        WHERE "token_hash" = ${tokenHash}
+          AND "used_at" IS NULL
+          AND "expires_at" > now()
+        RETURNING "profile_id"
+      `;
+      const token = claimed[0];
+      if (!token) {
+        throw AppError.badRequest(
+          ERROR_CODES.INVALID_TOKEN,
+          "This email verification link is invalid or has expired.",
+        );
+      }
+
+      const profile = await tx.profile.update({
+        where: { id: token.profile_id },
+        data: { email_confirmed_at: new Date() },
+        select: SESSION_SELECT,
+      });
+
+      await this.audit.record(
+        {
+          action: AuthAuditAction.email_verified,
+          actorId: profile.id,
+          targetId: profile.id,
+        },
+        tx,
+      );
+
+      await this.tokens.revokeAllForProfile(profile.id, { tx });
+
+      return this.tokens.issueSession(profile, tx);
+    });
+
+    return session;
+  }
+
+  async resendVerification(
+    dto: ResendVerificationDto,
+    ip: string | null,
+  ): Promise<typeof GENERIC_RESEND_RESPONSE> {
+    const profile = await this.prisma.profile
+      .findUnique({
+        where: { email: dto.email },
+        select: { id: true, email: true, account_status: true, email_confirmed_at: true },
+      })
+      .catch((error: unknown) => {
+        this.logger.error(
+          `resend_verification_lookup_failed error=${error instanceof Error ? error.name : "unknown"}`,
+        );
+        return null;
+      });
+
+    const rawToken = generateRawToken();
+    const tokenHash = sha256(rawToken);
+    const expiresAt = new Date(
+      Date.now() + this.authConfig.emailVerificationTtlHours * 60 * 60 * 1000,
+    );
+    const eligible =
+      profile !== null &&
+      profile.account_status === AccountStatus.active &&
+      profile.email_confirmed_at === null;
+
+    if (eligible) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.emailVerificationToken.updateMany({
+          where: { profile_id: profile.id, used_at: null },
+          data: { used_at: new Date() },
+        });
+        await tx.emailVerificationToken.create({
+          data: { profile_id: profile.id, token_hash: tokenHash, expires_at: expiresAt },
+        });
+      });
+
+      const url = `${this.config.get("appBaseUrl", { infer: true })}/auth/verify?token=${rawToken}`;
+      this.messaging.dispatch(
+        () => this.messaging.sendAuthEmail("signup", profile.email, { confirmationUrl: url }),
+        "resend_verification_email_failed",
+      );
+      await this.audit.record({
+        action: AuthAuditAction.email_verification_resent,
+        actorId: profile.id,
+        targetId: profile.id,
+        ip,
+      });
+    }
+
+    this.logger.log(
+      `email_verification_requested email=${redactEmail(dto.email)} ip=${ip ?? "unknown"} matched=${eligible}`,
+    );
+    return GENERIC_RESEND_RESPONSE;
   }
 
   // --- Sign in / out --------------------------------------------------------
