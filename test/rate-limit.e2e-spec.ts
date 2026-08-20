@@ -152,21 +152,49 @@ describe("Rate limiting (e2e)", () => {
     expect(source).toContain("ThrottlerStorageRedisService");
   });
 
+  it("does not branch fail-closed on NODE_ENV — auth policies always fail closed", () => {
+    for (const file of [
+      "route-aware-throttler.guard.ts",
+      "throttlers.ts",
+      "rate-limit.module.ts",
+    ]) {
+      const source = readFileSync(join(__dirname, "..", "src", "rate-limit", file), "utf8");
+      expect(source).not.toMatch(/NODE_ENV/);
+    }
+    expect(THROTTLER_POLICIES["auth-strict"].failClosed).toBe(true);
+    expect(THROTTLER_POLICIES["auth-strict-ip"].failClosed).toBe(true);
+    expect(THROTTLER_POLICIES.default.failClosed).toBe(false);
+  });
+
   describe("when Redis is unreachable", () => {
-    it("fails closed on auth routes and open on the generic baseline", async () => {
+    it.each(["development", "production"] as const)(
+      "fails closed on auth routes in NODE_ENV=%s",
+      async (nodeEnv) => {
+        const previous = process.env.NODE_ENV;
+        process.env.NODE_ENV = nodeEnv;
+        const isolated = await createE2EApp({ resetRateLimits: false });
+        try {
+          // Sever the client the guard depends on, without stopping the shared
+          // container that other workers are using.
+          isolated.redis.disconnect();
+
+          const signInResponse = await api(isolated)
+            .post("/auth/sign-in")
+            .send({ email: uniqueEmail("down"), password: PASSWORD });
+          expect(signInResponse.status).toBe(503);
+          expect(signInResponse.body.code).toBe("RATE_LIMIT_STORE_UNAVAILABLE");
+        } finally {
+          process.env.NODE_ENV = previous;
+          await isolated.close().catch(() => undefined);
+        }
+      },
+    );
+
+    it("still reports health when Redis is down, without an in-memory limiter", async () => {
       const isolated = await createE2EApp({ resetRateLimits: false });
       try {
-        // Sever the client the guard depends on, without stopping the shared
-        // container that other workers are using.
         isolated.redis.disconnect();
 
-        const signInResponse = await api(isolated)
-          .post("/auth/sign-in")
-          .send({ email: uniqueEmail("down"), password: PASSWORD });
-        expect(signInResponse.status).toBe(503);
-        expect(signInResponse.body.code).toBe("RATE_LIMIT_STORE_UNAVAILABLE");
-
-        // /health is exempt from throttling, so it still answers — and reports why.
         const health = await api(isolated).get("/health");
         expect(health.status).toBe(503);
         expect(health.body.code).toBe("SERVICE_UNHEALTHY");

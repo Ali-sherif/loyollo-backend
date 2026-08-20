@@ -11,6 +11,7 @@ loadE2EEnv();
 const runId = getRunId();
 const workerId = process.env.JEST_WORKER_ID ?? "1";
 process.env.NODE_ENV = "test";
+process.env.CORS_ORIGIN ??= "http://localhost:3000";
 process.env.DATABASE_URL = replaceDatabaseName(
   getAdminUrl(),
   workerDbName(runId, workerId),

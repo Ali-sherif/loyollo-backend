@@ -1,6 +1,9 @@
 import * as crypto from "../src/common/crypto.util";
+import { THROTTLER_POLICIES } from "../src/rate-limit/throttlers";
 import { createE2EApp, type E2EContext } from "./create-app";
 import { PASSWORD, api, signUpAdmin, uniqueEmail, waitForEmail } from "./auth-helpers";
+
+const STRICT_LIMIT = THROTTLER_POLICIES["auth-strict"].limit;
 
 /**
  * Verifies docs/backend/forgot-password-security.md. The property under test is
@@ -171,6 +174,45 @@ describe("Forgot password anti-enumeration (e2e)", () => {
         .send({ token: "not-a-real-token", password: "some-valid-password" })
         .expect(400);
       expect(response.body.code).toBe("INVALID_TOKEN");
+    });
+  });
+
+  describe("rate limiting", () => {
+    it("throttles existing and non-existing emails identically", async () => {
+      await ctx.redis.flushdb();
+      const { email } = await signUpAdmin(ctx);
+      const unknown = uniqueEmail("ghost");
+
+      const burn = async (address: string) => {
+        for (let attempt = 0; attempt < STRICT_LIMIT; attempt += 1) {
+          await api(ctx).post("/auth/forgot-password").send({ email: address }).expect(200);
+        }
+        return api(ctx).post("/auth/forgot-password").send({ email: address });
+      };
+
+      const knownBlocked = await burn(email);
+      const unknownBlocked = await burn(unknown);
+
+      expect(knownBlocked.status).toBe(429);
+      expect(unknownBlocked.status).toBe(429);
+      expect(knownBlocked.body.code).toBe("RATE_LIMIT_EXCEEDED");
+      expect(unknownBlocked.body.code).toBe(knownBlocked.body.code);
+      expect(unknownBlocked.body.message).toBe(knownBlocked.body.message);
+      expect(typeof unknownBlocked.body.details.retry_after_seconds).toBe("number");
+    });
+
+    it("fails closed when Redis is down, same as other auth-strict routes", async () => {
+      const isolated = await createE2EApp({ resetRateLimits: false });
+      try {
+        isolated.redis.disconnect();
+        const response = await api(isolated)
+          .post("/auth/forgot-password")
+          .send({ email: uniqueEmail("down") });
+        expect(response.status).toBe(503);
+        expect(response.body.code).toBe("RATE_LIMIT_STORE_UNAVAILABLE");
+      } finally {
+        await isolated.close().catch(() => undefined);
+      }
     });
   });
 });

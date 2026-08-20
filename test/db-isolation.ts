@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import dotenv from "dotenv";
+import Redis from "ioredis";
 import { Client } from "pg";
 
 export const DEFAULT_E2E_WORKER_COUNT = 2;
@@ -185,6 +186,40 @@ export async function waitForPostgres(timeoutMs = 30_000): Promise<void> {
     }
   }
   throw new Error(`Postgres is not reachable for e2e tests: ${String(lastError)}`);
+}
+
+/** Auth fails closed without Redis (ADR-020), so e2e must not start until it answers. */
+export async function waitForRedis(timeoutMs = 30_000): Promise<void> {
+  const host = process.env.REDIS_HOST ?? "localhost";
+  const port = Number(process.env.REDIS_PORT ?? 6379);
+  const password = process.env.REDIS_PASSWORD?.trim() || undefined;
+  const started = Date.now();
+  let lastError: unknown;
+
+  while (Date.now() - started < timeoutMs) {
+    const client = new Redis({
+      host,
+      port,
+      password,
+      connectTimeout: 1_000,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      lazyConnect: true,
+    });
+    client.on("error", () => undefined);
+    try {
+      await client.connect();
+      const pong = await client.ping();
+      await client.quit().catch(() => client.disconnect());
+      if (pong === "PONG") return;
+    } catch (error) {
+      lastError = error;
+      await client.quit().catch(() => client.disconnect());
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  throw new Error(`Redis is not reachable for e2e tests: ${String(lastError)}`);
 }
 
 export async function databaseExists(name: string): Promise<boolean> {
