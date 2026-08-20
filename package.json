@@ -7,8 +7,11 @@
     "node": ">=24"
   },
   "scripts": {
+    "prebuild": "prisma generate",
     "build": "nest build",
+    "prestart": "prisma generate",
     "start": "nest start",
+    "prestart:dev": "prisma generate",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate",

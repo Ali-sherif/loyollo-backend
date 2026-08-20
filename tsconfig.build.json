@@ -3,7 +3,10 @@
   "compilerOptions": {
     // Without this the root-level `prisma.config.ts` widens the inferred root and
     // the entrypoint lands at `dist/src/main.js` instead of `dist/main.js`.
-    "rootDir": "src"
+    "rootDir": "src",
+    // Nest `deleteOutDir` wipes `dist/` but would leave a root `.tsbuildinfo`.
+    // Incremental tsc then skips emit and `nest start` cannot find `dist/main`.
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]
