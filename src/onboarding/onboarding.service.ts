@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import type { AuthenticatedUser } from "../auth/authenticated-user";
 import { AppError, ERROR_CODES } from "../common/app.error";
+import type { Prisma } from "../generated/prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   isBusinessCategory,
@@ -104,16 +105,17 @@ export class OnboardingService {
     user: AuthenticatedUser,
     dto: PatchOnboardingDetailsDto,
   ): Promise<OnboardingState> {
-    const row = await this.loadBuyer(user.id);
-    this.assertIncomplete(row, "currency");
-    return this.update(row.id, {
-      num_locations: dto.num_locations,
-      main_location: dto.main_location,
-      avg_customers_per_day: dto.avg_customers_per_day,
-      avg_cheque_per_day: dto.avg_cheque_per_day,
-      currency: dto.currency,
-      website: dto.website ?? row.website,
-      business_name: dto.business_name ?? row.business_name,
+    return this.withLockedBuyer(user.id, async (tx, row) => {
+      this.assertIncomplete(row, "currency");
+      return this.update(tx, row.id, {
+        num_locations: dto.num_locations,
+        main_location: dto.main_location,
+        avg_customers_per_day: dto.avg_customers_per_day,
+        avg_cheque_per_day: dto.avg_cheque_per_day,
+        currency: dto.currency,
+        website: dto.website ?? row.website,
+        business_name: dto.business_name ?? row.business_name,
+      });
     });
   }
 
@@ -121,54 +123,58 @@ export class OnboardingService {
     user: AuthenticatedUser,
     dto: PatchBusinessTypeDto,
   ): Promise<OnboardingState> {
-    const row = await this.loadBuyer(user.id);
-    this.assertIncomplete(row, "other");
     if (!isBusinessCategory(dto.business_category)) {
       throw AppError.badRequest(
         ERROR_CODES.BUSINESS_TYPE_INVALID,
         "Business type is not in the official list.",
       );
     }
-    const industryStillValid =
-      row.business_type !== null && isIndustryOf(dto.business_category, row.business_type);
-    return this.update(row.id, {
-      business_category: dto.business_category,
-      business_type: industryStillValid ? row.business_type : null,
+    return this.withLockedBuyer(user.id, async (tx, row) => {
+      this.assertIncomplete(row, "other");
+      const industryStillValid =
+        row.business_type !== null && isIndustryOf(dto.business_category, row.business_type);
+      return this.update(tx, row.id, {
+        business_category: dto.business_category,
+        business_type: industryStillValid ? row.business_type : null,
+      });
     });
   }
 
   async patchIndustry(user: AuthenticatedUser, dto: PatchIndustryDto): Promise<OnboardingState> {
-    const row = await this.loadBuyer(user.id);
-    this.assertIncomplete(row, "other");
-    if (!row.business_category || !isIndustryOf(row.business_category, dto.business_type)) {
-      throw AppError.badRequest(
-        ERROR_CODES.BUSINESS_INDUSTRY_INVALID,
-        "Industry must be an official sub-type of the selected business type.",
-      );
-    }
-    return this.update(row.id, { business_type: dto.business_type });
+    return this.withLockedBuyer(user.id, async (tx, row) => {
+      this.assertIncomplete(row, "other");
+      if (!row.business_category || !isIndustryOf(row.business_category, dto.business_type)) {
+        throw AppError.badRequest(
+          ERROR_CODES.BUSINESS_INDUSTRY_INVALID,
+          "Industry must be an official sub-type of the selected business type.",
+        );
+      }
+      return this.update(tx, row.id, { business_type: dto.business_type });
+    });
   }
 
   async patchPlan(user: AuthenticatedUser, dto: PatchPlanDto): Promise<OnboardingState> {
-    const row = await this.loadBuyer(user.id);
-    this.assertIncomplete(row, "other");
-    return this.update(row.id, { plan: dto.plan });
+    return this.withLockedBuyer(user.id, async (tx, row) => {
+      this.assertIncomplete(row, "other");
+      return this.update(tx, row.id, { plan: dto.plan });
+    });
   }
 
   async complete(user: AuthenticatedUser): Promise<OnboardingState> {
-    const row = await this.loadBuyer(user.id);
-    if (row.onboarding_completed) return toState(row);
+    return this.withLockedBuyer(user.id, async (tx, row) => {
+      if (row.onboarding_completed) return toState(row);
 
-    const missing = REQUIRED_AT_COMPLETE.filter((field) => !row[field]);
-    if (missing.length > 0) {
-      throw AppError.badRequest(
-        ERROR_CODES.ONBOARDING_INCOMPLETE,
-        "Finish every onboarding step before continuing.",
-        { missing },
-      );
-    }
+      const missing = REQUIRED_AT_COMPLETE.filter((field) => !row[field]);
+      if (missing.length > 0) {
+        throw AppError.badRequest(
+          ERROR_CODES.ONBOARDING_INCOMPLETE,
+          "Finish every onboarding step before continuing.",
+          { missing },
+        );
+      }
 
-    return this.update(row.id, { onboarding_completed: true });
+      return this.update(tx, row.id, { onboarding_completed: true });
+    });
   }
 
   private async loadBuyer(profileId: string): Promise<OnboardingRow> {
@@ -176,15 +182,7 @@ export class OnboardingService {
       where: { id: profileId },
       select: ONBOARDING_SELECT,
     });
-    if (!row) {
-      throw AppError.unauthorized(ERROR_CODES.UNAUTHENTICATED, "Session expired or invalid.");
-    }
-    if (!isShopBuyer(row)) {
-      throw AppError.forbidden(
-        ERROR_CODES.ONBOARDING_NOT_APPLICABLE,
-        "Shop onboarding is only available to the shop owner.",
-      );
-    }
+    this.assertBuyer(row);
     return row;
   }
 
@@ -202,7 +200,47 @@ export class OnboardingService {
     );
   }
 
+  /**
+   * Every onboarding mutation takes the profile row lock before it checks or
+   * writes state. This makes completion, step dependencies, and post-complete
+   * locks one serialized state machine without duplicating ownership predicates
+   * across every UPDATE.
+   */
+  private withLockedBuyer<T>(
+    profileId: string,
+    mutate: (tx: Prisma.TransactionClient, row: OnboardingRow) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<OnboardingRow[]>`
+        SELECT
+          "id", "owner_id", "onboarding_completed", "num_locations",
+          "main_location", "website", "avg_customers_per_day",
+          "avg_cheque_per_day", "currency", "business_name",
+          "business_category", "business_type", "plan"
+        FROM "profiles"
+        WHERE "id" = ${profileId}::uuid
+        FOR UPDATE
+      `;
+      const row = rows[0];
+      this.assertBuyer(row);
+      return mutate(tx, row);
+    });
+  }
+
+  private assertBuyer(row: OnboardingRow | null | undefined): asserts row is OnboardingRow {
+    if (!row) {
+      throw AppError.unauthorized(ERROR_CODES.UNAUTHENTICATED, "Session expired or invalid.");
+    }
+    if (!isShopBuyer(row)) {
+      throw AppError.forbidden(
+        ERROR_CODES.ONBOARDING_NOT_APPLICABLE,
+        "Shop onboarding is only available to the shop owner.",
+      );
+    }
+  }
+
   private async update(
+    tx: Prisma.TransactionClient,
     id: string,
     data: Partial<
       Pick<
@@ -221,7 +259,7 @@ export class OnboardingService {
       >
     >,
   ): Promise<OnboardingState> {
-    const updated = await this.prisma.profile.update({
+    const updated = await tx.profile.update({
       where: { id },
       data,
       select: ONBOARDING_SELECT,

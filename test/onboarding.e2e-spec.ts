@@ -44,6 +44,24 @@ async function fillStepsThroughPlan(ctx: E2EContext, session: Session, plan = "p
   return client.patch("/api/onboarding/plan").send({ plan }).expect(200);
 }
 
+async function waitForBlockedOnboardingLocks(ctx: E2EContext, expected: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const rows = await ctx.prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*)::bigint AS "count"
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query LIKE '%FROM "profiles"%FOR UPDATE%'
+    `;
+    if (Number(rows[0]?.count ?? 0) >= expected) return;
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${expected} blocked onboarding row lock(s)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 describe("Onboarding (e2e)", () => {
   let ctx: E2EContext;
 
@@ -101,6 +119,38 @@ describe("Onboarding (e2e)", () => {
       expect(response.body.code).toBeUndefined();
     });
 
+    it("validates ISO currency and normalizes an optional website", async () => {
+      const { session } = await signUpAdmin(ctx);
+      const client = authed(ctx, session);
+
+      const invalidCurrency = await client
+        .patch("/api/onboarding/details")
+        .send({ ...DETAILS, currency: "ZZZ" })
+        .expect(400);
+      expect(invalidCurrency.body.code).toBe("VALIDATION_FAILED");
+
+      const normalized = await client
+        .patch("/api/onboarding/details")
+        .send({ ...DETAILS, currency: "egp", website: "  loyollo.com/store  " })
+        .expect(200);
+      expect(normalized.body.currency).toBe("EGP");
+      expect(normalized.body.website).toBe("https://loyollo.com/store");
+
+      const preserved = await client
+        .patch("/api/onboarding/details")
+        .send({ ...DETAILS, website: "   " })
+        .expect(200);
+      expect(preserved.body.website).toBe("https://loyollo.com/store");
+
+      for (const website of ["hello", "ftp://example.com", "javascript:alert(1)"]) {
+        const invalidWebsite = await client
+          .patch("/api/onboarding/details")
+          .send({ ...DETAILS, website })
+          .expect(400);
+        expect(invalidWebsite.body.code).toBe("VALIDATION_FAILED");
+      }
+    });
+
     it("rejects complete when required fields are missing", async () => {
       const { session } = await signUpAdmin(ctx);
       const response = await authed(ctx, session).post("/api/onboarding/complete").expect(400);
@@ -147,6 +197,67 @@ describe("Onboarding (e2e)", () => {
         .send({ business_category: "Automotive" })
         .expect(403);
       expect(type.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+    });
+
+    it("serializes a Business Type mutation ahead of completion", async () => {
+      const { session } = await signUpAdmin(ctx);
+      await fillStepsThroughPlan(ctx, session);
+
+      let releaseRowLock!: () => void;
+      const holdRowLock = new Promise<void>((resolve) => {
+        releaseRowLock = resolve;
+      });
+      let rowLocked!: () => void;
+      const rowLockAcquired = new Promise<void>((resolve) => {
+        rowLocked = resolve;
+      });
+
+      const lockTransaction = ctx.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id"
+          FROM "profiles"
+          WHERE "id" = ${session.user.id}::uuid
+          FOR UPDATE
+        `;
+        rowLocked();
+        await holdRowLock;
+      });
+
+      await rowLockAcquired;
+      const queuedType = Promise.resolve(
+        authed(ctx, session)
+          .patch("/api/onboarding/business-type")
+          .send({ business_category: "Automotive" }),
+      );
+      await waitForBlockedOnboardingLocks(ctx, 1);
+      const queuedComplete = Promise.resolve(
+        authed(ctx, session).post("/api/onboarding/complete"),
+      );
+      let results: [Awaited<typeof queuedType>, Awaited<typeof queuedComplete>] | undefined;
+      try {
+        await waitForBlockedOnboardingLocks(ctx, 2);
+        releaseRowLock();
+        results = await Promise.all([queuedType, queuedComplete]);
+      } finally {
+        releaseRowLock();
+        await Promise.allSettled([queuedType, queuedComplete]);
+        await lockTransaction;
+      }
+
+      if (!results) throw new Error("concurrent onboarding requests did not complete");
+      const [type, complete] = results;
+
+      expect(type.status).toBe(200);
+      expect(type.body.business_category).toBe("Automotive");
+      expect(type.body.business_type).toBeNull();
+      expect(complete.status).toBe(400);
+      expect(complete.body.code).toBe("ONBOARDING_INCOMPLETE");
+      expect(complete.body.details.missing).toContain("business_type");
+
+      const state = await authed(ctx, session).get("/api/onboarding").expect(200);
+      expect(state.body.onboarding_completed).toBe(false);
+      expect(state.body.business_category).toBe("Automotive");
+      expect(state.body.business_type).toBeNull();
     });
 
     it("rejects an unverified buyer", async () => {

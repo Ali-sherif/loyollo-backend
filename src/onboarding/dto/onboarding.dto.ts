@@ -1,5 +1,13 @@
 import { Transform } from "class-transformer";
-import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
+import {
+  IsISO4217CurrencyCode,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+  MinLength,
+} from "class-validator";
 
 import { PLANS } from "../business-types";
 
@@ -10,6 +18,13 @@ const trimEmptyToUndefined = ({ value }: { value: unknown }) => {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+};
+
+const normalizeOptionalWebsite = ({ value }: { value: unknown }) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  return /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
 };
 
 export class PatchOnboardingDetailsDto {
@@ -41,12 +56,13 @@ export class PatchOnboardingDetailsDto {
     typeof value === "string" ? value.trim().toUpperCase() : value,
   )
   @IsString()
-  @Matches(/^[A-Z]{3}$/, { message: "currency must be an ISO 4217 code" })
+  @IsISO4217CurrencyCode({ message: "currency must be an ISO 4217 code" })
   currency!: string;
 
   @IsOptional()
-  @Transform(trimEmptyToUndefined)
+  @Transform(normalizeOptionalWebsite)
   @IsString()
+  @IsUrl({ protocols: ["http", "https"], require_protocol: true })
   @MaxLength(200)
   website?: string;
 
