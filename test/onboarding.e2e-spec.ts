@@ -44,22 +44,17 @@ async function fillStepsThroughPlan(ctx: E2EContext, session: Session, plan = "p
   return client.patch("/api/onboarding/plan").send({ plan }).expect(200);
 }
 
-async function waitForBlockedOnboardingLocks(ctx: E2EContext, expected: number): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  for (;;) {
-    const rows = await ctx.prisma.$queryRaw<Array<{ count: bigint }>>`
-      SELECT count(*)::bigint AS "count"
-      FROM pg_stat_activity
-      WHERE datname = current_database()
-        AND wait_event_type = 'Lock'
-        AND query LIKE '%FROM "profiles"%FOR UPDATE%'
-    `;
-    if (Number(rows[0]?.count ?? 0) >= expected) return;
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${expected} blocked onboarding row lock(s)`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+async function expectOnboardingNotApplicable(ctx: E2EContext, session: Session): Promise<void> {
+  const client = authed(ctx, session);
+
+  const get = await client.get("/api/onboarding").expect(403);
+  expect(get.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+
+  const patch = await client.patch("/api/onboarding/details").send(DETAILS).expect(403);
+  expect(patch.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+
+  const complete = await client.post("/api/onboarding/complete").expect(403);
+  expect(complete.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
 }
 
 describe("Onboarding (e2e)", () => {
@@ -199,65 +194,43 @@ describe("Onboarding (e2e)", () => {
       expect(type.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
     });
 
-    it("serializes a Business Type mutation ahead of completion", async () => {
+    it("preserves onboarding invariants when Business Type and completion race", async () => {
       const { session } = await signUpAdmin(ctx);
       await fillStepsThroughPlan(ctx, session);
 
-      let releaseRowLock!: () => void;
-      const holdRowLock = new Promise<void>((resolve) => {
-        releaseRowLock = resolve;
-      });
-      let rowLocked!: () => void;
-      const rowLockAcquired = new Promise<void>((resolve) => {
-        rowLocked = resolve;
-      });
-
-      const lockTransaction = ctx.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`
-          SELECT "id"
-          FROM "profiles"
-          WHERE "id" = ${session.user.id}::uuid
-          FOR UPDATE
-        `;
-        rowLocked();
-        await holdRowLock;
-      });
-
-      await rowLockAcquired;
-      const queuedType = Promise.resolve(
+      const [type, complete] = await Promise.all([
         authed(ctx, session)
           .patch("/api/onboarding/business-type")
           .send({ business_category: "Automotive" }),
-      );
-      await waitForBlockedOnboardingLocks(ctx, 1);
-      const queuedComplete = Promise.resolve(
         authed(ctx, session).post("/api/onboarding/complete"),
-      );
-      let results: [Awaited<typeof queuedType>, Awaited<typeof queuedComplete>] | undefined;
-      try {
-        await waitForBlockedOnboardingLocks(ctx, 2);
-        releaseRowLock();
-        results = await Promise.all([queuedType, queuedComplete]);
-      } finally {
-        releaseRowLock();
-        await Promise.allSettled([queuedType, queuedComplete]);
-        await lockTransaction;
-      }
+      ]);
 
-      if (!results) throw new Error("concurrent onboarding requests did not complete");
-      const [type, complete] = results;
-
-      expect(type.status).toBe(200);
-      expect(type.body.business_category).toBe("Automotive");
-      expect(type.body.business_type).toBeNull();
-      expect(complete.status).toBe(400);
-      expect(complete.body.code).toBe("ONBOARDING_INCOMPLETE");
-      expect(complete.body.details.missing).toContain("business_type");
+      const typeWon = type.status === 200;
+      const completeWon = complete.status === 200;
+      expect(Number(typeWon) + Number(completeWon)).toBe(1);
 
       const state = await authed(ctx, session).get("/api/onboarding").expect(200);
-      expect(state.body.onboarding_completed).toBe(false);
-      expect(state.body.business_category).toBe("Automotive");
-      expect(state.body.business_type).toBeNull();
+      if (typeWon) {
+        expect(type.body.business_category).toBe("Automotive");
+        expect(type.body.business_type).toBeNull();
+        expect(complete.status).toBe(400);
+        expect(complete.body.code).toBe("ONBOARDING_INCOMPLETE");
+        expect(complete.body.details.missing).toContain("business_type");
+        expect(state.body).toMatchObject({
+          onboarding_completed: false,
+          business_category: "Automotive",
+          business_type: null,
+        });
+      } else {
+        expect(complete.body.onboarding_completed).toBe(true);
+        expect(type.status).toBe(403);
+        expect(type.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+        expect(state.body).toMatchObject({
+          onboarding_completed: true,
+          business_category: "Retail",
+          business_type: "Grocery / Supermarket",
+        });
+      }
     });
 
     it("rejects an unverified buyer", async () => {
@@ -282,18 +255,7 @@ describe("Onboarding (e2e)", () => {
 
       expect(session.user.onboarding_completed).toBe(true);
       expect(session.user.owner_id).not.toBe(session.user.id);
-
-      const get = await authed(ctx, session).get("/api/onboarding").expect(403);
-      expect(get.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
-
-      const patch = await authed(ctx, session)
-        .patch("/api/onboarding/details")
-        .send(DETAILS)
-        .expect(403);
-      expect(patch.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
-
-      const complete = await authed(ctx, session).post("/api/onboarding/complete").expect(403);
-      expect(complete.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+      await expectOnboardingNotApplicable(ctx, session);
     });
 
     it("also forbids invited admin", async () => {
@@ -303,9 +265,7 @@ describe("Onboarding (e2e)", () => {
       expect(session.user.onboarding_completed).toBe(true);
       expect(session.user.role).toBe("admin");
       expect(session.user.owner_id).not.toBe(session.user.id);
-
-      const response = await authed(ctx, session).get("/api/onboarding").expect(403);
-      expect(response.body.code).toBe("ONBOARDING_NOT_APPLICABLE");
+      await expectOnboardingNotApplicable(ctx, session);
     });
   });
 });

@@ -182,10 +182,20 @@ describe("Staff invitations (e2e)", () => {
         role: "staff",
         account_status: "active",
         owner_id: admin.user.owner_id,
+        email_confirmed_at: expect.any(String),
+        onboarding_completed: true,
       });
       expect(session.access_token).toEqual(expect.any(String));
       expect(session.refresh_token).toEqual(expect.any(String));
       expect(session).not.toHaveProperty("must_change_password");
+
+      const persisted = await ctx.prisma.profile.findUniqueOrThrow({
+        where: { id: session.user.id },
+        select: { email_confirmed_at: true, onboarding_completed: true },
+      });
+      expect(persisted.email_confirmed_at).toEqual(expect.any(Date));
+      expect(persisted.email_confirmed_at?.toISOString()).toBe(session.user.email_confirmed_at);
+      expect(persisted.onboarding_completed).toBe(true);
 
       // The new session works straight away.
       await authed(ctx, session).get("/auth/me").expect(200);
