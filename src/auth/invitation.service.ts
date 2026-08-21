@@ -362,6 +362,7 @@ export class InvitationService {
           role: invitation.role,
           account_status: AccountStatus.active,
           email_confirmed_at: new Date(),
+          onboarding_completed: true,
           owner_id: invitation.shop_id,
           branch_id: invitation.branch_id,
         },
@@ -372,6 +373,7 @@ export class InvitationService {
           account_status: true,
           owner_id: true,
           email_confirmed_at: true,
+          onboarding_completed: true,
         },
       });
 

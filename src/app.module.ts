@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { configuration } from "./config/configuration";
 import { HealthModule } from "./health/health.module";
 import { MessagingModule } from "./messaging/messaging.module";
+import { OnboardingModule } from "./onboarding/onboarding.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RateLimitModule } from "./rate-limit/rate-limit.module";
 import { RouteAwareThrottlerGuard } from "./rate-limit/route-aware-throttler.guard";
@@ -20,6 +21,7 @@ import { RouteAwareThrottlerGuard } from "./rate-limit/route-aware-throttler.gua
     RateLimitModule,
     MessagingModule,
     AuthModule,
+    OnboardingModule,
     HealthModule,
   ],
   providers: [

@@ -17,6 +17,7 @@ export type SessionProfile = {
   account_status: AccountStatus;
   email_confirmed_at: Date | null;
   owner_id: string | null;
+  onboarding_completed: boolean;
 };
 
 export type SessionUser = {
@@ -26,6 +27,7 @@ export type SessionUser = {
   account_status: AccountStatus;
   email_confirmed_at: string | null;
   owner_id: string;
+  onboarding_completed: boolean;
 };
 
 export type SessionResponse = {
@@ -48,6 +50,7 @@ export function toSessionUser(profile: SessionProfile): SessionUser {
     account_status: profile.account_status,
     email_confirmed_at: profile.email_confirmed_at?.toISOString() ?? null,
     owner_id: shopScopeOf(profile),
+    onboarding_completed: profile.onboarding_completed,
   };
 }
 

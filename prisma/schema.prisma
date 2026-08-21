@@ -54,7 +54,9 @@ model Profile {
   role           Role          @default(customer)
   account_status AccountStatus @default(active)
 
-  /// Shop scope. Null for `admin` (resolves to own `id`); set for `staff`.
+  /// Shop scope. Null for the shop-buyer `admin` (resolves to own `id`).
+  /// Set to the Shop for `staff` **and** invited `admin` — do not treat every
+  /// `admin` as a buyer.
   owner_id  String? @db.Uuid
   branch_id String? @db.Uuid
 
@@ -64,6 +66,24 @@ model Profile {
 
   /// LOYB-61. Null until merchant confirms signup email or accepts invitation.
   email_confirmed_at DateTime? @db.Timestamptz(6)
+
+  /// Shop-buyer onboarding gate. Invitees are created `true`. Not a JWT claim.
+  onboarding_completed Boolean @default(false)
+
+  business_name          String?
+  num_locations          String?
+  main_location          String?
+  website                String?
+  avg_customers_per_day  String?
+  avg_cheque_per_day     String?
+  /// ISO 4217 display currency. UI may label this "cheque currency".
+  currency               String?
+  /// Business Type — official English label (UX-21). Not `industry`.
+  business_category      String?
+  /// Industry — official sub-type of `business_category`.
+  business_type          String?
+  /// `starter` | `growth` | `premium`. Nullable until onboarding completes.
+  plan                   String?
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @updatedAt @db.Timestamptz(6)

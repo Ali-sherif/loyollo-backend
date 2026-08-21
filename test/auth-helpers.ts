@@ -14,6 +14,7 @@ export type Session = {
     account_status: string;
     owner_id: string;
     email_confirmed_at: string | null;
+    onboarding_completed: boolean;
   };
   permissions: string[];
   access_token: string;

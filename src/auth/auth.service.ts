@@ -30,6 +30,7 @@ const SESSION_SELECT = {
   account_status: true,
   owner_id: true,
   email_confirmed_at: true,
+  onboarding_completed: true,
 } as const;
 
 type ClaimedEmailVerification = { profile_id: string };

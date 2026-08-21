@@ -39,6 +39,7 @@ export class AccountsService {
         account_status: true,
         owner_id: true,
         email_confirmed_at: true,
+        onboarding_completed: true,
       },
     });
 
@@ -66,6 +67,7 @@ export class AccountsService {
           account_status: true,
           owner_id: true,
           email_confirmed_at: true,
+          onboarding_completed: true,
         },
       });
 
