@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
   Validate,
@@ -23,6 +24,11 @@ import { AccountStatus, Role } from "../../generated/prisma/enums";
  */
 const MIN_PASSWORD = 12;
 const MAX_PASSWORD = 200;
+const MAX_SIGN_UP_EMAIL = 200;
+const MAX_NAME = 200;
+/** Canonical NANP E.164: `+1` + 10 digits. */
+const NANP_PHONE_E164_LENGTH = 12;
+const NANP_PHONE_PATTERN = /^\+1\d{10}$/;
 
 const normalizeEmailTransform = ({ value }: { value: unknown }) =>
   typeof value === "string" ? value.trim().toLowerCase() : value;
@@ -46,7 +52,7 @@ class MatchesFieldConstraint implements ValidatorConstraintInterface {
 export class SignUpDto {
   @Transform(normalizeEmailTransform)
   @IsEmail()
-  @MaxLength(320)
+  @MaxLength(MAX_SIGN_UP_EMAIL)
   email!: string;
 
   @IsString()
@@ -57,19 +63,22 @@ export class SignUpDto {
   @Transform(trimStringTransform)
   @IsString()
   @MinLength(1)
-  @MaxLength(200)
+  @MaxLength(MAX_NAME)
   full_name!: string;
 
   @Transform(trimStringTransform)
   @IsString()
   @MinLength(1)
-  @MaxLength(200)
+  @MaxLength(MAX_NAME)
   business_name!: string;
 
   @Transform(trimStringTransform)
   @IsString()
-  @MinLength(1)
-  @MaxLength(50)
+  @MinLength(NANP_PHONE_E164_LENGTH)
+  @MaxLength(NANP_PHONE_E164_LENGTH)
+  @Matches(NANP_PHONE_PATTERN, {
+    message: "phone must be a North American number in +1XXXXXXXXXX format",
+  })
   phone!: string;
 
   @IsString()
@@ -191,7 +200,7 @@ export class AcceptInviteDto {
 
   @IsString()
   @MinLength(1)
-  @MaxLength(200)
+  @MaxLength(MAX_NAME)
   full_name!: string;
 
   @IsString()

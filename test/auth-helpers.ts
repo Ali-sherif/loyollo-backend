@@ -39,7 +39,7 @@ export function signUpBody(
     confirm_password: PASSWORD,
     full_name: "Test Owner",
     business_name: "Test Shop",
-    phone: "+1 416 555 0100",
+    phone: "+14165550100",
     agree_terms: true,
     agree_privacy: true,
     ...overrides,

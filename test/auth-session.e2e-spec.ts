@@ -31,7 +31,7 @@ describe("Auth session lifecycle (e2e)", () => {
           signUpBody(` ${email.toUpperCase()} `, {
             full_name: " Corner Owner ",
             business_name: " Corner Cafe ",
-            phone: " 555-0100 ",
+            phone: " +14165550100 ",
           }),
         )
         .expect(201);
@@ -53,7 +53,7 @@ describe("Auth session lifecycle (e2e)", () => {
       expect(profile).toMatchObject({
         full_name: "Corner Owner",
         business_name: "Corner Cafe",
-        phone: "555-0100",
+        phone: "+14165550100",
       });
       const mail = await waitForEmail(() => ctx.mailer.lastTo(email));
       expect(mail.templateName).toBe("auth:signup");
@@ -118,6 +118,42 @@ describe("Auth session lifecycle (e2e)", () => {
       expect(await ctx.prisma.profile.findUnique({ where: { email } })).toBeNull();
       expect(ctx.mailer.lastTo(email)).toBeUndefined();
     });
+
+    it.each([
+      "abc",
+      "+",
+      "123-456",
+      "+1 (416) 555-0100",
+      "4165550100",
+      "+1416555010",
+      "+141655501001",
+      "+44165550100",
+      "+15550100",
+    ])("rejects noncanonical phone value %p", async (phone) => {
+      const email = uniqueEmail("invalid-phone");
+      const response = await api(ctx)
+        .post("/auth/sign-up")
+        .send(signUpBody(email, { phone }))
+        .expect(400);
+
+      expect(response.body.code).toBe("VALIDATION_FAILED");
+      expect(response.body.details.fields).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: "phone" })]),
+      );
+      expect(await ctx.prisma.profile.findUnique({ where: { email } })).toBeNull();
+      expect(ctx.mailer.lastTo(email)).toBeUndefined();
+    });
+
+    it.each(["+14165550100", "+12125551234"])(
+      "accepts NANP phone value %p",
+      async (phone) => {
+        const email = uniqueEmail("valid-phone");
+        await api(ctx).post("/auth/sign-up").send(signUpBody(email, { phone })).expect(201);
+
+        const profile = await ctx.prisma.profile.findUniqueOrThrow({ where: { email } });
+        expect(profile.phone).toBe(phone);
+      },
+    );
 
     it("refuses a duplicate email", async () => {
       const { email } = await signUpAdmin(ctx);
