@@ -1,5 +1,13 @@
 import { createE2EApp, type E2EContext } from "./create-app";
-import { PASSWORD, api, authed, signUpAdmin, uniqueEmail, waitForEmail } from "./auth-helpers";
+import {
+  PASSWORD,
+  api,
+  authed,
+  signUpAdmin,
+  signUpBody,
+  uniqueEmail,
+  waitForEmail,
+} from "./auth-helpers";
 
 describe("Auth session lifecycle (e2e)", () => {
   let ctx: E2EContext;
@@ -15,11 +23,17 @@ describe("Auth session lifecycle (e2e)", () => {
   beforeEach(() => ctx.mailer.reset());
 
   describe("sign-up", () => {
-    it("registers a merchant as an active admin owning their own shop", async () => {
+    it("registers a merchant and persists the required identity and contact fields", async () => {
       const email = uniqueEmail("owner");
       const response = await api(ctx)
         .post("/auth/sign-up")
-        .send({ email, password: PASSWORD, full_name: "Corner Cafe" })
+        .send(
+          signUpBody(` ${email.toUpperCase()} `, {
+            full_name: " Corner Owner ",
+            business_name: " Corner Cafe ",
+            phone: " 555-0100 ",
+          }),
+        )
         .expect(201);
 
       expect(response.body.user).toMatchObject({
@@ -35,6 +49,12 @@ describe("Auth session lifecycle (e2e)", () => {
       );
       expect(typeof response.body.access_token).toBe("string");
       expect(typeof response.body.refresh_token).toBe("string");
+      const profile = await ctx.prisma.profile.findUniqueOrThrow({ where: { email } });
+      expect(profile).toMatchObject({
+        full_name: "Corner Owner",
+        business_name: "Corner Cafe",
+        phone: "555-0100",
+      });
       const mail = await waitForEmail(() => ctx.mailer.lastTo(email));
       expect(mail.templateName).toBe("auth:signup");
       expect(mail.subject).toBe("Confirm your email");
@@ -49,7 +69,7 @@ describe("Auth session lifecycle (e2e)", () => {
       ]) {
         const response = await api(ctx)
           .post("/auth/sign-up")
-          .send({ email: uniqueEmail("escalate"), password: PASSWORD, ...override })
+          .send(signUpBody(uniqueEmail("escalate"), override))
           .expect(400);
         expect(response.body.code).toBe("VALIDATION_FAILED");
       }
@@ -58,16 +78,52 @@ describe("Auth session lifecycle (e2e)", () => {
     it("enforces the 12-character minimum password", async () => {
       const response = await api(ctx)
         .post("/auth/sign-up")
-        .send({ email: uniqueEmail("weak"), password: "short" })
+        .send(
+          signUpBody(uniqueEmail("weak"), {
+            password: "short",
+            confirm_password: "short",
+          }),
+        )
         .expect(400);
       expect(response.body.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("requires names, phone, matching password confirmation, and both consents", async () => {
+      const email = uniqueEmail("required");
+      const response = await api(ctx)
+        .post("/auth/sign-up")
+        .send(
+          signUpBody(email, {
+            full_name: "   ",
+            business_name: "   ",
+            phone: "   ",
+            confirm_password: "not-the-password",
+            agree_terms: false,
+            agree_privacy: false,
+          }),
+        )
+        .expect(400);
+
+      expect(response.body.code).toBe("VALIDATION_FAILED");
+      expect(response.body.details.fields.map((field: { field: string }) => field.field)).toEqual(
+        expect.arrayContaining([
+          "full_name",
+          "business_name",
+          "phone",
+          "confirm_password",
+          "agree_terms",
+          "agree_privacy",
+        ]),
+      );
+      expect(await ctx.prisma.profile.findUnique({ where: { email } })).toBeNull();
+      expect(ctx.mailer.lastTo(email)).toBeUndefined();
     });
 
     it("refuses a duplicate email", async () => {
       const { email } = await signUpAdmin(ctx);
       const response = await api(ctx)
         .post("/auth/sign-up")
-        .send({ email, password: PASSWORD })
+        .send(signUpBody(email))
         .expect(409);
       expect(response.body.code).toBe("EMAIL_ALREADY_REGISTERED");
     });

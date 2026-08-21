@@ -299,13 +299,13 @@ export class InvitationService {
 
     const shop = await this.prisma.profile.findUnique({
       where: { id: invitation.shop_id },
-      select: { full_name: true },
+      select: { business_name: true, full_name: true },
     });
 
     return {
       valid: true,
       email: invitation.email,
-      shop_name: shop?.full_name?.trim() || "Loyollo",
+      shop_name: shop?.business_name?.trim() || shop?.full_name?.trim() || "Loyollo",
       branch_name: invitation.branch.name,
       role: invitation.role,
       expires_at: invitation.expires_at.toISOString(),
@@ -416,14 +416,14 @@ export class InvitationService {
   }): Promise<void> {
     const shop = await this.prisma.profile.findUnique({
       where: { id: args.shopId },
-      select: { full_name: true },
+      select: { business_name: true, full_name: true },
     });
 
     const acceptUrl = `${this.config.get("appBaseUrl", { infer: true })}/accept-invite?token=${args.rawToken}`;
 
     const result = await this.messaging.sendAuthEmail("invite", args.email, {
       confirmationUrl: acceptUrl,
-      shopName: shop?.full_name?.trim() || "Loyollo",
+      shopName: shop?.business_name?.trim() || shop?.full_name?.trim() || "Loyollo",
       branchName: args.branchName,
       role: args.role,
       expiresAt: args.expiresAt.toUTCString(),

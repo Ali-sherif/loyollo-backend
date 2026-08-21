@@ -70,20 +70,21 @@ model Profile {
   /// Shop-buyer onboarding gate. Invitees are created `true`. Not a JWT claim.
   onboarding_completed Boolean @default(false)
 
-  business_name          String?
-  num_locations          String?
-  main_location          String?
-  website                String?
-  avg_customers_per_day  String?
-  avg_cheque_per_day     String?
+  business_name         String?
+  phone                 String?
+  num_locations         String?
+  main_location         String?
+  website               String?
+  avg_customers_per_day String?
+  avg_cheque_per_day    String?
   /// ISO 4217 display currency. UI may label this "cheque currency".
-  currency               String?
+  currency              String?
   /// Business Type — official English label (UX-21). Not `industry`.
-  business_category      String?
+  business_category     String?
   /// Industry — official sub-type of `business_category`.
-  business_type          String?
+  business_type         String?
   /// `starter` | `growth` | `premium`. Nullable until onboarding completes.
-  plan                   String?
+  plan                  String?
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @updatedAt @db.Timestamptz(6)

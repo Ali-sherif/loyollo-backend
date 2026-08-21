@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { createE2EApp, type E2EContext } from "./create-app";
-import { PASSWORD, api, authed, signUpAdmin, uniqueEmail, type Session } from "./auth-helpers";
+import {
+  PASSWORD,
+  api,
+  authed,
+  signUpAdmin,
+  signUpBody,
+  uniqueEmail,
+  type Session,
+} from "./auth-helpers";
 import { THROTTLER_POLICIES } from "../src/rate-limit/throttlers";
 
 const STRICT_LIMIT = THROTTLER_POLICIES["auth-strict"].limit;
@@ -74,7 +82,7 @@ describe("Rate limiting (e2e)", () => {
     // sign-up shares the policy but not the bucket.
     const signUp = await api(ctx)
       .post("/auth/sign-up")
-      .send({ email: uniqueEmail("perroute-signup"), password: PASSWORD });
+      .send(signUpBody(uniqueEmail("perroute-signup")));
     expect(signUp.status).toBe(201);
   });
 

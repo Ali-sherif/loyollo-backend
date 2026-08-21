@@ -29,6 +29,23 @@ export function uniqueEmail(prefix: string): string {
   return `${prefix}-${randomUUID()}@example.test`;
 }
 
+export function signUpBody(
+  email: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    email,
+    password: PASSWORD,
+    confirm_password: PASSWORD,
+    full_name: "Test Owner",
+    business_name: "Test Shop",
+    phone: "+1 416 555 0100",
+    agree_terms: true,
+    agree_privacy: true,
+    ...overrides,
+  };
+}
+
 /** Registers a merchant admin without consuming the verification email. */
 export async function signUpAdminUnverified(
   ctx: E2EContext,
@@ -36,7 +53,7 @@ export async function signUpAdminUnverified(
 ): Promise<{ email: string; session: Session }> {
   const response = await api(ctx)
     .post("/auth/sign-up")
-    .send({ email, password: PASSWORD, full_name: "Test Shop" });
+    .send(signUpBody(email));
   if (response.status !== 201) {
     throw new Error(`sign-up failed: ${response.status} ${JSON.stringify(response.body)}`);
   }

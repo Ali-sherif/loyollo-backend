@@ -1,12 +1,18 @@
 import { Transform } from "class-transformer";
 import {
+  Equals,
   IsEmail,
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   MinLength,
+  Validate,
+  type ValidationArguments,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
 } from "class-validator";
 
 import { AccountStatus, Role } from "../../generated/prisma/enums";
@@ -20,6 +26,17 @@ const MAX_PASSWORD = 200;
 
 const normalizeEmailTransform = ({ value }: { value: unknown }) =>
   typeof value === "string" ? value.trim().toLowerCase() : value;
+
+const trimStringTransform = ({ value }: { value: unknown }) =>
+  typeof value === "string" ? value.trim() : value;
+
+@ValidatorConstraint({ name: "matchesField", async: false })
+class MatchesFieldConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const [relatedProperty] = args.constraints as [string];
+    return value === (args.object as Record<string, unknown>)[relatedProperty];
+  }
+}
 
 /**
  * `role`, `account_status`, `owner_id`, and `shop_id` are absent from every DTO in
@@ -37,10 +54,38 @@ export class SignUpDto {
   @MaxLength(MAX_PASSWORD)
   password!: string;
 
-  @IsOptional()
+  @Transform(trimStringTransform)
   @IsString()
+  @MinLength(1)
   @MaxLength(200)
-  full_name?: string;
+  full_name!: string;
+
+  @Transform(trimStringTransform)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  business_name!: string;
+
+  @Transform(trimStringTransform)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(50)
+  phone!: string;
+
+  @IsString()
+  @MaxLength(MAX_PASSWORD)
+  @Validate(MatchesFieldConstraint, ["password"], {
+    message: "confirm_password must match password",
+  })
+  confirm_password!: string;
+
+  @IsBoolean()
+  @Equals(true)
+  agree_terms!: boolean;
+
+  @IsBoolean()
+  @Equals(true)
+  agree_privacy!: boolean;
 }
 
 export class SignInDto {

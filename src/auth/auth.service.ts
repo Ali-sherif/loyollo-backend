@@ -102,7 +102,9 @@ export class AuthService {
         data: {
           email: dto.email,
           password_hash: passwordHash,
-          full_name: dto.full_name ?? null,
+          full_name: dto.full_name,
+          business_name: dto.business_name,
+          phone: dto.phone,
           role: Role.admin,
           account_status: AccountStatus.active,
           owner_id: null,
@@ -549,7 +551,7 @@ export class AuthService {
   async changePassword(user: AuthenticatedUser, dto: ChangePasswordDto) {
     const profile = await this.prisma.profile.findUnique({
       where: { id: user.id },
-      select: { ...SESSION_SELECT, password_hash: true, full_name: true },
+      select: { ...SESSION_SELECT, password_hash: true, full_name: true, business_name: true },
     });
     if (!profile) {
       throw AppError.unauthorized(ERROR_CODES.UNAUTHENTICATED, "Session expired or invalid.");
@@ -579,7 +581,8 @@ export class AuthService {
     this.messaging.dispatch(
       () =>
         this.messaging.sendTransactionalEmail("password_changed", profile.email, {
-          businessName: profile.full_name?.trim() || "Loyollo",
+          businessName:
+            profile.business_name?.trim() || profile.full_name?.trim() || "Loyollo",
         }),
       "password_changed_email_failed",
     );
